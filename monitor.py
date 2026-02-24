@@ -1,9 +1,16 @@
 import os
 import asyncio
 import time
+import logging
 import docker
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes
+
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=logging.INFO,
+)
+log = logging.getLogger("monitor")
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
 ALLOWED_USERS = [int(uid) for uid in os.environ["ALLOWED_USERS"].split(",")]
@@ -27,6 +34,7 @@ def get_stats(name: str) -> dict | None:
     try:
         c = client.containers.get(name)
         if c.status != "running":
+            log.warning(f"Container {name} nao esta running (status={c.status})")
             return None
         stats = c.stats(stream=False)
         cpu_delta = (
@@ -48,12 +56,16 @@ def get_stats(name: str) -> dict | None:
             "mem_usage": f"{mem_usage // 1024 // 1024}MB / {mem_limit // 1024 // 1024}MB",
             "status": "running",
         }
-    except Exception:
+    except Exception as e:
+        log.error(f"Erro ao obter stats de {name}: {e}")
         return None
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_allowed(update.effective_user.id):
+    user = update.effective_user
+    log.info(f"/start de {user.full_name} (@{user.username}, id={user.id})")
+    if not is_allowed(user.id):
+        log.warning(f"Acesso negado para {user.id}")
         await update.message.reply_text("Sem permissao.")
         return
     alert_chat_ids.add(update.effective_chat.id)
@@ -66,14 +78,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_allowed(update.effective_user.id):
+    user = update.effective_user
+    log.info(f"/stop de {user.full_name} (@{user.username}, id={user.id})")
+    if not is_allowed(user.id):
         return
     alert_chat_ids.discard(update.effective_chat.id)
     await update.message.reply_text("Monitoramento pausado.")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_allowed(update.effective_user.id):
+    user = update.effective_user
+    log.info(f"/status de {user.full_name} (@{user.username}, id={user.id})")
+    if not is_allowed(user.id):
         return
     lines = []
     for name in CONTAINERS:
@@ -89,8 +105,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    log.info(f"/id de {user.full_name} (@{user.username}, id={user.id})")
     await update.message.reply_text(
-        f"Seu user ID: `{update.effective_user.id}`", parse_mode="Markdown"
+        f"*User ID:* `{user.id}`\n"
+        f"*Nome:* {user.full_name}\n"
+        f"*Username:* @{user.username}\n"
+        f"*Chat ID:* `{update.effective_chat.id}`",
+        parse_mode="Markdown",
     )
 
 
@@ -103,6 +125,7 @@ async def monitor_loop(app: Application):
 
                 if stats is None:
                     if not container_down.get(name) and now - last_alerts.get(name, 0) >= COOLDOWN:
+                        log.warning(f"ALERTA: container {name} caiu!")
                         for chat_id in alert_chat_ids:
                             await app.bot.send_message(
                                 chat_id, f"*{name}* caiu!", parse_mode="Markdown"
@@ -111,6 +134,7 @@ async def monitor_loop(app: Application):
                         container_down[name] = True
                 else:
                     if container_down.get(name):
+                        log.info(f"Container {name} voltou")
                         for chat_id in alert_chat_ids:
                             await app.bot.send_message(
                                 chat_id, f"*{name}* voltou!", parse_mode="Markdown"
@@ -124,6 +148,7 @@ async def monitor_loop(app: Application):
                         msg += f"*{name}* — MEM em *{stats['mem']}%* ({stats['mem_usage']})\n"
 
                     if msg and now - last_alerts.get(name, 0) >= COOLDOWN:
+                        log.warning(f"ALERTA: {name} CPU={stats['cpu']}% MEM={stats['mem']}%")
                         for chat_id in alert_chat_ids:
                             await app.bot.send_message(chat_id, msg, parse_mode="Markdown")
                         last_alerts[name] = now
@@ -132,6 +157,7 @@ async def monitor_loop(app: Application):
 
 
 async def post_init(app: Application):
+    log.info(f"Bot iniciado | Containers: {CONTAINERS} | CPU>{CPU_LIMIT}% MEM>{MEM_LIMIT}% | Intervalo: {INTERVALO}s")
     await app.bot.set_my_commands([
         BotCommand("start", "Ativar monitoramento"),
         BotCommand("stop", "Pausar monitoramento"),
