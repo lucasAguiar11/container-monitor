@@ -1,0 +1,9 @@
+services:
+  monitor-bot:
+    build: .
+    container_name: docker-monitor-bot
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    env_file:
+      - .env
