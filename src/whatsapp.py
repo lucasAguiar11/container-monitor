@@ -156,26 +156,6 @@ async def send_text(number: str, text: str) -> bool:
 
 
 
-async def send_poll(number: str, name: str, values: list[str], selectable_count: int = 1) -> bool:
-    async with aiohttp.ClientSession() as session:
-        payload = {
-            "number": number,
-            "name": name,
-            "selectableCount": selectable_count,
-            "values": values,
-        }
-        async with session.post(
-            _url(f"message/sendPoll/{EVOLUTION_INSTANCE}"),
-            headers=_headers(),
-            json=payload,
-        ) as resp:
-            if resp.status in (200, 201):
-                return True
-            data = await resp.json()
-            log.error(f"Erro ao enviar poll para {number}: {resp.status} {data}")
-            return False
-
-
 async def send_alert(text: str):
     for number in alert_numbers:
         await send_text(number, text)

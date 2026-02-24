@@ -76,15 +76,8 @@ async def handle_webhook(request: web.Request) -> web.Response:
         key = msg_data.get("key", {})
         sender = key.get("remoteJid", "").split("@")[0]
         from_me = key.get("fromMe", False)
-        message = msg_data.get("message", {})
-
-        poll_response = message.get("pollUpdateMessage") or message.get("pollResponseMessage")
-        if poll_response:
-            log.info(f"Poll response de {sender}: {poll_response}")
-            return web.Response(text="OK")
-
-        text = message.get("conversation") or \
-               message.get("extendedTextMessage", {}).get("text", "")
+        text = msg_data.get("message", {}).get("conversation") or \
+               msg_data.get("message", {}).get("extendedTextMessage", {}).get("text", "")
 
         if from_me or not text:
             return web.Response(text="OK")
@@ -114,7 +107,16 @@ async def handle_webhook(request: web.Request) -> web.Response:
             await wa.send_text(sender, monitor.format_status_plain())
 
         elif cmd in ("/help", "help", "ajuda", "menu"):
-            await wa.send_poll(sender, "Container Monitor", ["Start", "Stop"])
+            active = "ON" if sender in wa.alert_numbers else "OFF"
+            await wa.send_text(
+                sender,
+                f"*Container Monitor*\n"
+                f"Alertas: {active}\n\n"
+                f"*status* — ver containers agora\n"
+                f"*start* — ativar alertas\n"
+                f"*stop* — desativar alertas\n"
+                f"*menu* — exibir este menu",
+            )
 
         else:
             await wa.send_text(
