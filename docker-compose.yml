@@ -3,7 +3,78 @@ services:
     build: .
     container_name: docker-monitor-bot
     restart: unless-stopped
+    depends_on:
+      evolution-api:
+        condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     env_file:
       - .env
+    networks:
+      - monitor-net
+
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: evolution-api
+    restart: unless-stopped
+    depends_on:
+      evolution-redis:
+        condition: service_healthy
+      evolution-postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env.evolution
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - monitor-net
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/').then(r => process.exit(r.status ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  evolution-redis:
+    image: redis:7-alpine
+    container_name: evolution-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - evolution_redis:/data
+    networks:
+      - monitor-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  evolution-postgres:
+    image: postgres:15-alpine
+    container_name: evolution-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:-evolution123}
+      POSTGRES_DB: evolution
+    volumes:
+      - evolution_postgres:/var/lib/postgresql/data
+    networks:
+      - monitor-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  evolution_instances:
+  evolution_redis:
+  evolution_postgres:
+
+networks:
+  monitor-net:
+    driver: bridge
