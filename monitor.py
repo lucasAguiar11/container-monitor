@@ -3,6 +3,7 @@ import asyncio
 import time
 import logging
 import docker
+import psutil
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -24,6 +25,17 @@ client = docker.from_env()
 alert_chat_ids: set[int] = set()
 last_alerts: dict[str, float] = {}
 container_down: dict[str, bool] = {}
+
+
+def host_usage() -> str:
+    cpu = psutil.cpu_percent(interval=1)
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+    return (
+        f"CPU: {cpu}% | "
+        f"MEM: {mem.percent}% ({mem.used // 1024 // 1024}MB / {mem.total // 1024 // 1024}MB) | "
+        f"Disco: {disk.percent}% ({disk.used // 1024 // 1024 // 1024}GB / {disk.total // 1024 // 1024 // 1024}GB)"
+    )
 
 
 def is_allowed(user_id: int) -> bool:
@@ -125,19 +137,25 @@ async def monitor_loop(app: Application):
 
                 if stats is None:
                     if not container_down.get(name) and now - last_alerts.get(name, 0) >= COOLDOWN:
-                        log.warning(f"ALERTA: container {name} caiu!")
+                        usage = host_usage()
+                        log.warning(f"ALERTA: container {name} caiu! | {usage}")
                         for chat_id in alert_chat_ids:
                             await app.bot.send_message(
-                                chat_id, f"*{name}* caiu!", parse_mode="Markdown"
+                                chat_id,
+                                f"*{name}* caiu!\n\n`{usage}`",
+                                parse_mode="Markdown",
                             )
                         last_alerts[name] = now
                         container_down[name] = True
                 else:
                     if container_down.get(name):
-                        log.info(f"Container {name} voltou")
+                        usage = host_usage()
+                        log.info(f"Container {name} voltou | {usage}")
                         for chat_id in alert_chat_ids:
                             await app.bot.send_message(
-                                chat_id, f"*{name}* voltou!", parse_mode="Markdown"
+                                chat_id,
+                                f"*{name}* voltou!\n\n`{usage}`",
+                                parse_mode="Markdown",
                             )
                         container_down[name] = False
 
