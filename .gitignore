@@ -1,2 +1,4 @@
 .env
+.env.evolution
 __pycache__/
+venv/
